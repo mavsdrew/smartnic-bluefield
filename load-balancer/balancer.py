@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 
-from flask import Flask, request, jsonify
-from collections import defaultdict
-import os
-import time
-import random
-import logging
+# Importação de bibliotecas
+from flask import Flask, request, jsonify  # Flask para criar APIs, request para lidar com dados de entrada, jsonify para formatar respostas em JSON
+from collections import defaultdict  # Usado para criar dicionários com valores padrão
+import os  # Para obter variáveis de ambiente
+import time  # Para medir o tempo (latência)
+import random  # Para gerar IDs aleatórios
+import logging  # Para registrar eventos e informações de debug
 
 # Configura o logging para rastrear operações do balanceador
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -13,20 +14,21 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 # Inicializa a aplicação Flask
 app = Flask(__name__)
 
-# Configurações dos servidores NGINX (obtidas de variáveis de ambiente ou valores padrão)
+# Configurações dos servidores NGINX
+# As configurações de servidores, porta e estratégia são lidas de variáveis de ambiente
 #SERVERS = ["192.168.1.101", "192.168.1.102", "192.168.1.103"]  # Servidores NGINX
 #PORT = 80  # Porta padrão para HTTP
-#strategy = "round_robin"  # Estratégia de balanceamento: round_robin ou least_connectionsn
+#strategy = "round_robin"  # Estratégia de balanceamento: "round_robin" ou "least_connectionsn"
 SERVERS = os.getenv("SERVERS", "192.168.1.101,192.168.1.102,192.168.1.103").split(",")
 PORT = int(os.getenv("PORT", 80))  # Porta padrão para HTTP
-STRATEGY = os.getenv("STRATEGY", "round_robin")  # Estratégia de balanceamento: round_robin ou least_connections
+STRATEGY = os.getenv("STRATEGY", "round_robin")  # Estratégia de balanceamento: "round_robin" ou "least_connections"
 
-# Estado compartilhado
+# Estado compartilhado do balanceador
 current_server = 0  # Índice do servidor atual (para round_robin)
 connections = defaultdict(int)  # Contador de conexões ativas para cada servidor (least_connections)
-metrics = defaultdict(lambda: {"requests": 0, "latency": []})  # Métricas para cada servidor
+metrics = defaultdict(lambda: {"requests": 0, "latency": []})  # Métricas como número de requisições e latências
 
-# Endpoint principal para balanceamento
+# Endpoint principal para balanceamento de carga
 @app.route('/balance', methods=['POST'])
 def balance():
     """
@@ -38,7 +40,7 @@ def balance():
     if not request.json or "flow_id" not in request.json:
         return jsonify({"error": "Invalid request. Missing 'flow_id'"}), 400
     
-    # Captura o fluxo ID da requisição ou gera um ID aleatório
+    # Captura o ID do fluxo ou gera um novo ID aleatório, caso não esteja no payload
     flow_id = request.json.get('flow_id', random.randint(1, 100000))
     start_time = time.time()  # Marca o tempo inicial para cálculo da latência
     # print(f"Processing flow: {flow_id}")  # Print simples para debug
@@ -46,22 +48,22 @@ def balance():
 
     # Escolhe o servidor baseado na estratégia configurada
     if STRATEGY == "round_robin":
-        server = SERVERS[current_server]  # Escolhe o servidor atual
-        current_server = (current_server + 1) % len(SERVERS)  # Avança para o próximo servidor
+        server = SERVERS[current_server]  # Escolhe o servidor atual (servidor atual no índice)
+        current_server = (current_server + 1) % len(SERVERS)  # Avança para o próximo servidor no round-robin
     elif STRATEGY == "least_connections":
-        server = min(SERVERS, key=lambda s: connections[s])  # Servidor com menos conexões
+        server = min(SERVERS, key=lambda s: connections[s])  # EScolhe o servidor com menos conexões
         connections[server] += 1  # Incrementa o número de conexões para este servidor
     else:
-        return jsonify({"erro": "Estratégia inválida"}), 400  # Retorna erro se a estratégia não for válida
+        return jsonify({"erro": "Estratégia inválida"}), 400  # Retorna erro se a estratégia não for suportada (válida)
 
-    # Atualiza as métricas de desempenho/performance
-    metrics[server]["requests"] += 1
-    metrics[server]["latency"].append(time.time() - start_time)
+    # Atualiza as métricas do servidor
+    metrics[server]["requests"] += 1  # Incrementa o número de requisições
+    metrics[server]["latency"].append(time.time() - start_time)  # Calcula a latência da requisição
 
-    # Log da decisão de balanceamento
+    # Log da decisão do balanceador
     logging.info(f"Flow {flow_id} directed to server {server} using {STRATEGY} strategy.")
 
-    # Retorna a decisão do balanceamento (servidor e porta)
+    # Retorna a decisão de balanceamento
     return jsonify({"server": server, "porta": PORT, "flow_id": flow_id})
 
 # Endpoint para liberar conexões após término do uso
@@ -77,12 +79,12 @@ def release_flow():
     if server not in SERVERS:
         return jsonify({"error": f"Server {server} is not in the server list."}), 400
 
-    # Decrementa o contador de conexões do servidor, se aplicável
+    # Decrementa o número de conexões para o servidor
     if server in connections and connections[server] > 0:
         connections[server] -= 1  # Decrementa o contador de conexões
-
-    # Log do evento de liberação
-    logging.info(f"Connection released from server {server}.")
+        logging.info(f"Connection released from server {server}.")
+    else:
+        logging.warning(f"Release request for server {server}, but no active connections found.")
 
     return jsonify({"status": "ok"}), 200  # Retorna confirmação
 
@@ -91,8 +93,8 @@ def release_flow():
 def monitor():
     """
     Retorna métricas em tempo real para cada servidor:
-    - Número de conexões ativas por servidor
-    - Número total de requisições por servidor
+    - Número de conexões ativas
+    - Número total de requisições
     - Latência média, máxima e mínima
     """
     monitor_data = {}
@@ -112,10 +114,8 @@ def monitor():
             "max_latency": max_latency,  # Latência máxima
             "min_latency": min_latency,  # Latência mínima
         }
-
-    # Log do evento de monitoramento
-    logging.info("Monitor data retrieved.")
-
+    
+    logging.info("Monitor data retrieved.")  # Log do evento de monitoramento
     return jsonify(monitor_data)
 
 if __name__ == "__main__":
