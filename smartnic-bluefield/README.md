@@ -18,7 +18,7 @@ Este projeto demonstra como usar a programabilidade de infraestruturas de rede p
 1. Clone o repositório:
    ```bash
    git clone https://github.com/mavsdrew/smartnic-bluefield.git
-   cd balancer
+   cd smartnic-bluefield
 
 # Avaliação de Desempenho do Balanceador
 
