@@ -90,7 +90,7 @@ wrk -t12 -c400 -d30s -s post.lua http://<ip_do_balanceador>:<porta>/balance
 - `-d30s`: Executa o teste por 30 segundos.
 - `-s post.lua`: Utiliza o script Lua `post.lua` para enviar requisições POST com um payload personalizado.
 
-OBS.: Para Desenvolvimento e Testes Locais, use a porta 5000, pois facilita o teste e não requer permissões elevadas. Para Produção, use a porta padrão 80. Neste trabalho, usamos a porta padrão 80.
+**Observação**: Para Desenvolvimento e Testes Locais, use a porta 5000, pois facilita o teste e não requer permissões elevadas. Para Produção, use a porta padrão 80. Neste trabalho, usamos a porta padrão 80.
 
 ## Conclusão
 
