@@ -4,6 +4,23 @@
 # Mensagem inicial
 echo "Configuração do ambiente de balanceamento de carga iniciada."
 
+# ******************************************************
+# Verifica dependências
+if ! command -v dpdk-devbind &> /dev/null; then
+    echo "Erro: dpdk-devbind não encontrado. Instale o DPDK."
+    exit 1
+fi
+
+if ! command -v python3 &> /dev/null; then
+    echo "Erro: Python 3 não encontrado."
+    exit 1
+fi
+
+# Configurações do DPDK
+echo "Configurando DPDK..."
+sudo dpdk-devbind --bind=mlx5_core <interface>
+# ******************************************************
+
 # Verifica se o Docker está instalado
 if ! command -v docker &> /dev/null; then
     echo "Erro: Docker não está instalado. Por favor, instale o Docker antes de executar este script."

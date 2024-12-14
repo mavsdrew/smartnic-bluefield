@@ -34,6 +34,57 @@ except Exception as e:
     logging.error(f"Error initializing DOCA Flow: {e}")
     exit(1)
 
+# ******************************************************
+# Função para criar um pipeline DOCA Flow com Hairpin
+def create_hairpin_pipeline(doca_context):
+    """
+    Cria um pipeline DOCA Flow para encaminhar pacotes entre portas físicas.
+    """
+    try:
+        match = {
+            "outer_l4_type": "UDP",
+            "outer_l3_type": "IPV4",
+            "src_ip": "0.0.0.0",
+            "dst_ip": "255.255.255.255",
+            "src_port": 0,
+            "dst_port": 65535
+        }
+        fwd = {"type": "port", "port_id": 1}
+        pipe_id = doca_flow.add_pipeline(doca_context, match, fwd)
+        logging.info(f"Hairpin pipeline created with ID {pipe_id}")
+        return pipe_id
+    except Exception as e:
+        logging.error(f"Failed to create hairpin pipeline: {e}")
+        return None
+
+# Função para criar um pipeline DOCA Flow com RSS e metadados
+def create_rss_meta_pipeline(doca_context):
+    """
+    Cria um pipeline DOCA Flow para manipular tráfego com RSS e metadados.
+    """
+    try:
+        match = {
+            "outer_l4_type": "UDP",
+            "outer_l3_type": "IPV4",
+            "src_ip": "0.0.0.0",
+            "dst_ip": "255.255.255.255",
+            "src_port": 0,
+            "dst_port": 65535
+        }
+        actions = {"meta": {"pkt_meta": 10}}
+        rss_config = {
+            "type": "RSS",
+            "rss_queues": [0],  # Exemplo com a fila 0
+            "rss_inner_flags": ["IPV4", "UDP"]
+        }
+        pipe_id = doca_flow.add_pipeline(doca_context, match, actions, rss_config)
+        logging.info(f"RSS Meta pipeline created with ID {pipe_id}")
+        return pipe_id
+    except Exception as e:
+        logging.error(f"Failed to create RSS Meta pipeline: {e}")
+        return None
+# ******************************************************
+
 # Middleware para configurar timeout para requisições Flask
 @app.before_request
 def set_timeout():
@@ -47,14 +98,13 @@ def balance():
     """
     global current_server  # Necessário para alterar o estado global do índice do servidor
 
-     # Valida o payload recebido
+    # Valida o payload recebido
     if not request.json or "flow_id" not in request.json:
         return jsonify({"error": "Invalid request. Missing 'flow_id'"}), 400
     
     # Captura o ID do fluxo ou gera um novo ID aleatório
     flow_id = request.json.get('flow_id', random.randint(1, 100000))
     start_time = time.time()  # Marca o tempo inicial para cálculo da latência
-    # print(f"Processing flow: {flow_id}")  # Print simples para debug
     logging.info(f"Processing flow {flow_id}.")  # Log simples para debug
 
     # Escolhe o servidor baseado na estratégia configurada
@@ -64,6 +114,18 @@ def balance():
     elif STRATEGY == "least_connections":
         server = min(SERVERS, key=lambda s: connections[s])  # Escolhe o servidor com menos conexões
         connections[server] += 1  # Incrementa o número de conexões para este servidor
+    # ******************************************************
+    elif STRATEGY == "hairpin":
+        pipe_id = create_hairpin_pipeline(doca_context)
+        if not pipe_id:
+            return jsonify({"error": "Failed to create Hairpin pipeline"}), 500
+        return jsonify({"strategy": "hairpin", "pipeline_id": pipe_id})
+    elif STRATEGY == "rss_meta":
+        pipe_id = create_rss_meta_pipeline(doca_context)
+        if not pipe_id:
+            return jsonify({"error": "Failed to create RSS Meta pipeline"}), 500
+        return jsonify({"strategy": "rss_meta", "pipeline_id": pipe_id})
+    # ******************************************************
     else:
         return jsonify({"error": "Invalid strategy. Supported strategies are 'round_robin' and 'least_connections'."}), 400  # Retorna erro se a estratégia não for suportada
 
