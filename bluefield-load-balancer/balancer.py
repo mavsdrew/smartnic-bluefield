@@ -3,6 +3,8 @@
 # Importação de bibliotecas
 from flask import Flask, request, jsonify  # Flask para criar APIs, request para lidar com dados de entrada, jsonify para formatar respostas em JSON
 from collections import defaultdict  # Usado para criar dicionários com valores padrão
+from pipelines.hairpin_pipeline import create_hairpin_pipeline  # Função para pipeline Hairpin
+from pipelines.rss_meta_pipeline import create_rss_meta_pipeline  # Função para pipeline RSS Meta
 import os  # Para obter variáveis de ambiente
 import time  # Para medir o tempo (latência)
 import random  # Para gerar IDs aleatórios
@@ -15,8 +17,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 # Inicializa a aplicação Flask
 app = Flask(__name__)
 
-# Configurações dos servidores NGINX
-# Lidas de variáveis de ambiente para flexibilidade
+# Configurações dos servidores NGINX (obtidas de variáveis de ambiente para flexibilidade)
 SERVERS = os.getenv("SERVERS", "192.168.1.101,192.168.1.102,192.168.1.103").split(",")
 PORT = int(os.getenv("PORT", 80))  # Porta padrão para HTTP e configurável
 STRATEGY = os.getenv("STRATEGY", "round_robin")  # Estratégia de balanceamento: "round_robin" ou "least_connections"
@@ -24,71 +25,15 @@ STRATEGY = os.getenv("STRATEGY", "round_robin")  # Estratégia de balanceamento:
 # Estado compartilhado do balanceador
 current_server = 0  # Índice do servidor atual (para round_robin)
 connections = defaultdict(int)  # Contador de conexões ativas para cada servidor (least_connections)
-metrics = defaultdict(lambda: {"requests": 0, "latency": []})  # Métricas como número de requisições e latências
+metrics = defaultdict(lambda: {"requests": 0, "latency": []})  # Métricas por servidor
 
-# Inicializa o DOCA Flow
+# Inicializa o contexto DOCA Flow
 try:
-    doca_context = doca_flow.init("balanceador", {})  # Contexto DOCA inicializado
+    doca_context = doca_flow.init("bluefield_balancer", {})  # Contexto DOCA inicializado
     logging.info("DOCA Flow initialized successfully.")
 except Exception as e:
     logging.error(f"Error initializing DOCA Flow: {e}")
     exit(1)
-
-# ******************************************************
-# Função para criar um pipeline DOCA Flow com Hairpin
-def create_hairpin_pipeline(doca_context):
-    """
-    Cria um pipeline DOCA Flow para encaminhar pacotes entre portas físicas.
-    """
-    try:
-        match = {
-            "outer_l4_type": "UDP",
-            "outer_l3_type": "IPV4",
-            "src_ip": "0.0.0.0",
-            "dst_ip": "255.255.255.255",
-            "src_port": 0,
-            "dst_port": 65535
-        }
-        fwd = {"type": "port", "port_id": 1}
-        pipe_id = doca_flow.add_pipeline(doca_context, match, fwd)
-        logging.info(f"Hairpin pipeline created with ID {pipe_id}")
-        return pipe_id
-    except Exception as e:
-        logging.error(f"Failed to create hairpin pipeline: {e}")
-        return None
-
-# Função para criar um pipeline DOCA Flow com RSS e metadados
-def create_rss_meta_pipeline(doca_context):
-    """
-    Cria um pipeline DOCA Flow para manipular tráfego com RSS e metadados.
-    """
-    try:
-        match = {
-            "outer_l4_type": "UDP",
-            "outer_l3_type": "IPV4",
-            "src_ip": "0.0.0.0",
-            "dst_ip": "255.255.255.255",
-            "src_port": 0,
-            "dst_port": 65535
-        }
-        actions = {"meta": {"pkt_meta": 10}}
-        rss_config = {
-            "type": "RSS",
-            "rss_queues": [0],  # Exemplo com a fila 0
-            "rss_inner_flags": ["IPV4", "UDP"]
-        }
-        pipe_id = doca_flow.add_pipeline(doca_context, match, actions, rss_config)
-        logging.info(f"RSS Meta pipeline created with ID {pipe_id}")
-        return pipe_id
-    except Exception as e:
-        logging.error(f"Failed to create RSS Meta pipeline: {e}")
-        return None
-# ******************************************************
-
-# Middleware para configurar timeout para requisições Flask
-@app.before_request
-def set_timeout():
-    request.environ['werkzeug.request_timeout'] = 10  # Timeout de 10 segundos
 
 # Endpoint principal para balanceamento de carga
 @app.route('/balance', methods=['POST'])
@@ -114,8 +59,7 @@ def balance():
     elif STRATEGY == "least_connections":
         server = min(SERVERS, key=lambda s: connections[s])  # Escolhe o servidor com menos conexões
         connections[server] += 1  # Incrementa o número de conexões para este servidor
-    # ******************************************************
-    elif STRATEGY == "hairpin":
+    if STRATEGY == "hairpin":
         pipe_id = create_hairpin_pipeline(doca_context)
         if not pipe_id:
             return jsonify({"error": "Failed to create Hairpin pipeline"}), 500
@@ -125,18 +69,19 @@ def balance():
         if not pipe_id:
             return jsonify({"error": "Failed to create RSS Meta pipeline"}), 500
         return jsonify({"strategy": "rss_meta", "pipeline_id": pipe_id})
-    # ******************************************************
     else:
-        return jsonify({"error": "Invalid strategy. Supported strategies are 'round_robin' and 'least_connections'."}), 400  # Retorna erro se a estratégia não for suportada
+        return jsonify({"error": "Invalid strategy."}), 400  # Retorna erro para estratégia inválida
 
     # Configura o fluxo no DOCA para manipulação no BlueField
     try:
+        # Adiciona regra DOCA Flow com base no servidor escolhido
         rule_id = doca_flow.add_rule(doca_context, {"server_ip": server, "port": PORT})
-        if rule_id is None:
-            raise Exception("Rule ID is None")
+        if not rule_id:  # Valida se a regra foi criada com sucesso
+            raise ValueError("Rule ID retornou None")
+        logging.info(f"DOCA Flow rule added successfully: Rule ID {rule_id}")
     except Exception as e:
         logging.error(f"Error adding DOCA Flow rule: {e}")
-        return jsonify({"error": "Failed to add flow to DOCA."}), 500
+        return jsonify({"error": "Failed to configure stream in DOCA."}), 500
 
     # Atualiza as métricas do servidor
     metrics[server]["requests"] += 1  # Incrementa o número de requisições
@@ -146,7 +91,7 @@ def balance():
     # Retorna a decisão de balanceamento
     return jsonify({"server": server, "porta": PORT, "flow_id": flow_id})
 
-# Endpoint para liberar conexões após término do uso
+# Endpoint para liberar conexões após término do uso (necessário para estratégia "least_connections")
 @app.route('/release', methods=['POST'])
 def release_flow():
     """
@@ -161,14 +106,18 @@ def release_flow():
 
     # Valida se o servidor está na lista configurada
     if server not in SERVERS:
+        logging.warning(f"Server {server} not found in configured list.")
         return jsonify({"error": f"Server {server} is not in the server list."}), 400
 
     # Decrementa o número de conexões para o servidor
-    if server in connections and connections[server] > 0:
-        connections[server] -= 1  # Decrementa o contador de conexões
-        logging.info(f"Connection released from server {server}.")
+    if server in connections:
+        if connections[server] > 0:
+            connections[server] -= 1  # Decrementa o contador de conexões
+            logging.info(f"Connection released from server {server}. Active connections: {connections[server]}."")
+        else:
+            logging.warning(f"Release request for {server}, but no active connection found.")
     else:
-        logging.warning(f"Release request for server {server}, but no active connections found.")
+        logging.warning(f"Server {server} has no initialized counter.")
 
     return jsonify({"status": "ok"}), 200  # Retorna confirmação
 

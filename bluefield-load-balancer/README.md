@@ -1,72 +1,103 @@
-# Balanceador de Carga - SmartNIC BlueField
+# **Balanceador de Carga - SmartNIC BlueField**
 
-Este projeto demonstra como usar a programabilidade de infraestruturas de rede para distribuir tráfego HTTP entre servidores backend (NGINX) utilizando a SmartNIC BlueField, com suporte para estratégias como `round_robin` e `least_connections`.
+Este projeto demonstra como usar a programabilidade de infraestruturas de rede para distribuir tráfego HTTP entre servidores backend (NGINX) utilizando a SmartNIC BlueField, com suporte para estratégias como `round_robin`, `least_connections`, `rss_meta` e `hairpin`.
 
 Este balanceador melhora o desempenho ao offloadar o processamento de pacotes HTTP para a SmartNIC BlueField, permitindo maior escalabilidade e flexibilidade.
 
-
 ---
 
-## Requisitos
+## **Requisitos**
 
 1. **Docker**: Para executar os contêineres NGINX.
 2. **Python 3.8+**: Para rodar o balanceador.
 3. **wrk**: Ferramenta para teste de desempenho.
 4. **post.lua**: Script Lua para simular requisições POST personalizadas (ver seção abaixo).
 5. **DOCA SDK**: Necessário para integração com a SmartNIC BlueField.
+6. **DPDK**: Para configuração de interfaces da SmartNIC.
+
+---
+
+## **Estrutura de Diretórios**
+
+```plaintext
+bluefield-load-balancer/
+├── balancer.py                   # Arquivo principal do balanceador
+├── deploy.sh                     # Script para configurar e implantar o ambiente
+├── pipelines/                    # Diretório para pipelines DOCA Flow
+│   ├── __init__.py               # Arquivo para inicializar o pacote pipelines
+│   ├── hairpin_pipeline.py       # Código para criar pipelines Hairpin
+│   ├── rss_meta_pipeline.py      # Código para criar pipelines RSS com metadados
+├── requirements.txt              # Dependências do projeto
+├── README.md                     # Documentação do projeto
+├── .gitignore                    # Arquivo para ignorar arquivos/diretórios no Git
+```
 
 ---
 
 ## Instalação
 
 1. Clone o repositório:
-   ```bash
-   git clone https://github.com/mavsdrew/smartnic-bluefield.git
-   cd bluefield-load-balancer
+    ```bash
+    git clone https://github.com/mavsdrew/smartnic-bluefield.git
+    cd bluefield-load-balancer
+    ```
+
+2. Instale as dependências:
+  - Utilize um ambiente virtual para instalar as dependências:
+    ```bash
+    python3 -m venv venv  
+    source venv/bin/activate
+    pip install -r requirements.txt
+    ```
 
 ## Configuração do Ambiente Nvidia BlueField
 
-1. **Configuração do DOCA:**
-   - Instale o SDK DOCA:
-     ```bash
-     wget https://developer.download.nvidia.com/doca/<sdk_version>.tar.gz
-     tar -xvf <sdk_version>.tar.gz
-     cd <sdk_version>
-     ./install.sh
-     ```
-   - Certifique-se de que o DOCA Flow está funcionando:
-     ```bash
-     doca_flow -h
-     ```
+  - Instale o SDK DOCA:
+    ```bash
+    wget https://developer.download.nvidia.com/doca/<sdk_version>.tar.gz
+    tar -xvf <sdk_version>.tar.gz
+    cd <sdk_version>
+    ./install.sh
+    ```
+  - Certifique-se de que o DOCA Flow está funcionando:
+    ```bash
+    doca_flow -h
+    ```
+## Execute o Script de Implantação:
+  - Use o script deploy.sh para configurar o ambiente completo:
+    ```bash
+    bash deploy.sh
+    ```
 
-2. **Configuração do BlueField:**
-   - Ative as funções virtuais (VFs) no BlueField:
-     ```bash
-     echo 3 > /sys/class/net/<interface>/device/sriov_numvfs
-     ```
-     Substitua `<interface>` pelo nome da interface de rede conectada ao BlueField, como `enp1s0f0`.
+# Execução
 
-3. **Configuração do DOCA Flow:**
-   - Crie um arquivo de configuração para o DOCA Flow:
-     ```bash
-     vim /etc/doca_flow_hairpin.cfg
-     ```
-     Adicione o seguinte conteúdo:
-     ```
-     [hairpin]
-     pipeline = true
-     ```
-     Este arquivo define como o DOCA irá processar os pacotes de rede usando pipelines no modo hairpin.
-   - Inicie o DOCA Flow:
-     ```bash
-     doca_flow_hairpin -c /etc/doca_flow_hairpin.cfg
-     ```
+Após a configuração, o balanceador estará disponível na porta 80. Você pode interagir com os seguintes endpoints:
 
-4. **Executar o Balanceador:**
-   - Inicie o balanceador com o script `deploy.sh`:
-     ```bash
-     bash deploy.sh
-     ```
+## Endpoints Disponíveis
+  
+1. /balance (POST):
+  - Redireciona fluxos para os servidores backend com base na estratégia configurada.
+  - Exemplo de payload:
+    ```json
+    {
+      "flow_id": 12345
+    }
+    ```
+  
+2. /monitor (GET):
+  - Retorna métricas de desempenho em tempo real para cada servidor.
+  - Exemplo de saída:
+    ```json
+    {
+      "192.168.1.101": {
+          "active_connections": 5,
+          "total_requests": 120,
+          "average_latency": 0.023,
+          "max_latency": 0.045,
+          "min_latency": 0.010
+      }
+    }
+    ```
 
 # Avaliação de Desempenho do Balanceador
 
@@ -94,4 +125,4 @@ wrk -t12 -c400 -d30s -s post.lua http://<ip_do_balanceador>:<porta>/balance
 
 ## Conclusão
 
-Este projeto demonstra como integrar DOCA Flow com balanceamento HTTP em um ambiente SmartNIC Nvidia BlueField, aproveitando sua capacidade de programabilidade. As instruções fornecidas devem permitir a instalação, configuração e testes de desempenho completos.
+Este projeto demonstra como integrar DOCA Flow com balanceamento HTTP em um ambiente SmartNIC Nvidia BlueField. As instruções fornecidas permitem a instalação, configuração e testes de desempenho completos.

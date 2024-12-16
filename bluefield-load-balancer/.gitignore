@@ -1,4 +1,30 @@
+# Logs e dados temporários
 logs/
-__pycache__/
 *.log
-.env
+
+# Diretórios e arquivos gerados pelo Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ambiente virtual Python
+env/
+venv/
+*.env
+
+# Configurações locais
+*.local
+
+# Arquivos de configuração específicos do sistema
+*.cfg
+*.ini
+
+# Docker
+docker-compose.override.yml
+
+# Outros arquivos gerados
+*.swp
+*.bak
+*.tmp
+.DS_Store
